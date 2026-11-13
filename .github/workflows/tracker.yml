@@ -1,0 +1,29 @@
+name: Tradeify 24-7 Cloud Tracker
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Tracker
+        run: |
+          python tracker.py
+
+      - name: Commit Updated State
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add tracked_state.json tradeify_1296_codes.txt 2>/dev/null || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update tracker state [skip ci]" && git push)

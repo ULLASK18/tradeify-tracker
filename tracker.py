@@ -7,10 +7,10 @@ import sys
 STATE_FILE = 'tracked_state.json'
 TRADEIFY_CODES_FILE = 'tradeify_1296_codes.txt'
 LUCID_CODES_FILE = 'lucid_combinations.txt'
-CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+ALPHABET_ONLY = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 NTFY_TOPIC = "tradeify-lucid-alert"
 
-# Baseline IDs that have already been seen/processed so fresh containers never re-notify
 BASELINE_SEEN_IDS = {
     "2121181285473218802",
     "2121182360049995809",
@@ -74,11 +74,9 @@ def load_state():
             with open(STATE_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
                 if isinstance(saved, dict):
-                    # Merge loaded state
                     for k in ["tradeify", "lucid"]:
                         if k in saved and isinstance(saved[k], dict):
                             state[k].update(saved[k])
-                            # Ensure baseline IDs always present
                             existing = set(state[k].get("seen_ids", []))
                             state[k]["seen_ids"] = list(existing.union(BASELINE_SEEN_IDS))
                     state["last_checked"] = saved.get("last_checked", "")
@@ -90,24 +88,65 @@ def save_state(state):
     with open(STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=2)
 
-def generate_lucid_combinations(known_prefix, remaining_count=2):
+def generate_tradeify_1296(a, b, c):
     import random
-    combos = []
+    combinations = []
+    for d in ALPHANUMERIC:
+        for e in ALPHANUMERIC:
+            code = f"TDFY-6{a}SU-{b}3{c}D-Z{d}{e}6"
+            combinations.append((d, e, code))
+    random.shuffle(combinations)
+    
+    with open(TRADEIFY_CODES_FILE, 'w', encoding='utf-8') as f:
+        f.write(f"# TRADEIFY BULL PACK - 1,296 CODE COMBINATIONS\n")
+        f.write(f"# Confirmed ABC: A={a}, B={b}, C={c}\n")
+        f.write(f"# Total: {len(combinations)} combinations for (D, E)\n\n")
+        for d, e, code in combinations:
+            f.write(f"{code}  (Slot D: {d}, Slot E: {e})\n")
+    return combinations
+
+def generate_lucid_combinations(known_prefix, remaining_count=2):
+    """
+    When 4 more characters are revealed (e.g. XCxxxx), 2 characters remain.
+    Generates all 1,296 alphanumeric combinations (36x36), prioritizing the 676
+    pure alphabet (A-Z) combinations first since Venom mentioned 'alphabet drops'.
+    """
+    import random
+    letter_combos = []
+    other_combos = []
+    
     if remaining_count == 2:
-        for c1 in CHARSET:
-            for c2 in CHARSET:
-                combos.append(f"LUCIDFLEX25K-{known_prefix}{c1}{c2}")
+        # 1. Pure letters first (26 x 26 = 676)
+        for c1 in ALPHABET_ONLY:
+            for c2 in ALPHABET_ONLY:
+                letter_combos.append(f"LUCIDFLEX25K-{known_prefix}{c1}{c2}")
+        random.shuffle(letter_combos)
+        
+        # 2. Mixed alphanumeric remaining (1296 - 676 = 620)
+        for c1 in ALPHANUMERIC:
+            for c2 in ALPHANUMERIC:
+                code = f"LUCIDFLEX25K-{known_prefix}{c1}{c2}"
+                if code not in letter_combos:
+                    other_combos.append(code)
+        random.shuffle(other_combos)
+        
+        all_combos = letter_combos + other_combos
+        
     elif remaining_count == 1:
-        for c1 in CHARSET:
-            combos.append(f"LUCIDFLEX25K-{known_prefix}{c1}")
-            
-    random.shuffle(combos)
+        for c in ALPHABET_ONLY:
+            letter_combos.append(f"LUCIDFLEX25K-{known_prefix}{c}")
+        for c in "0123456789":
+            other_combos.append(f"LUCIDFLEX25K-{known_prefix}{c}")
+        all_combos = letter_combos + other_combos
+
     with open(LUCID_CODES_FILE, 'w', encoding='utf-8') as f:
-        f.write(f"# LUCID FLEX 25K COMBINATIONS ({len(combos)} total)\n")
-        f.write(f"# Known prefix: LUCIDFLEX25K-{known_prefix}\n\n")
-        for c in combos:
+        f.write(f"# LUCID FLEX 25K - {len(all_combos)} COMBINATIONS\n")
+        f.write(f"# Known prefix: LUCIDFLEX25K-{known_prefix}\n")
+        f.write(f"# Top {len(letter_combos)} are pure alphabets (A-Z)\n\n")
+        for c in all_combos:
             f.write(f"{c}\n")
-    return combos
+            
+    return all_combos
 
 def check_lucid(state):
     l_state = state.setdefault("lucid", {
@@ -118,7 +157,6 @@ def check_lucid(state):
     seen_ids = set(l_state.get("seen_ids", []))
     current_pattern = l_state.get("revealed_pattern", "XC______")
     
-    # Check both venom's profile and latest known tweet
     urls = [
         "https://x.com/venom_NeverDies",
         "https://x.com/venom_NeverDies/status/2121487762767724738"
@@ -137,14 +175,13 @@ def check_lucid(state):
             print(f"Error fetching {url}: {e}")
             continue
 
-        # Look for LUCIDFLEX25K pattern updates
         patterns = re.findall(r'LUCIDFLEX25K-([A-Za-z0-9_]{3,12})', html)
         for pat in patterns:
-            # Check if this pattern reveals more non-underscore characters than current
             clean_pat = pat.upper()
             known_chars = clean_pat.replace('_', '')
             curr_known_chars = current_pattern.replace('_', '')
             
+            # Trigger whenever a new letter is revealed
             if len(known_chars) > len(curr_known_chars):
                 print(f"*** NEW LUCID PATTERN REVEALED: {clean_pat} ***")
                 l_state["revealed_pattern"] = clean_pat
@@ -152,24 +189,23 @@ def check_lucid(state):
                 
                 send_mobile_alert(
                     "Lucid Flex 25K: New Letter Revealed!",
-                    f"Updated Code Pattern: LUCIDFLEX25K-{clean_pat}\nKnown letters: {known_chars}",
+                    f"Updated Code: LUCIDFLEX25K-{clean_pat}\nKnown letters ({len(known_chars)}/8): {known_chars}",
                     priority="urgent",
                     tags="key,party_popper"
                 )
                 
-                # If only 1 or 2 characters remaining, auto-generate all codes!
+                # When 4 more letters are revealed, 2 remain -> Auto-generate 1,296 codes!
                 underscores_left = clean_pat.count('_')
                 if 0 < underscores_left <= 2:
                     combos = generate_lucid_combinations(known_chars, remaining_count=underscores_left)
                     send_mobile_alert(
-                        f"Lucid Code Almost Done! {len(combos)} Combos Ready!",
-                        f"Only {underscores_left} characters left! Codes file attached.",
+                        f"Lucid Code Ready! {len(combos)} Combos Generated!",
+                        f"Only {underscores_left} characters left! Complete codes file attached.",
                         priority="urgent",
                         tags="fire,rotating_light"
                     )
                     send_mobile_file(LUCID_CODES_FILE, f"LucidFlex25K {len(combos)} Codes ({clean_pat})")
 
-        # Collect tweet IDs so we track seen tweets
         tid_matches = re.findall(r'edit_tweet_ids\\*":\[\\*"([0-9]+)\\*"\]', html)
         for tid in tid_matches:
             seen_ids.add(tid)
@@ -221,7 +257,6 @@ def check_tradeify(state):
 
         seen_ids.add(tid)
 
-        # STRICT FILTER: Only alert if it's an actual slot confirmation from admin!
         if author.lower() in ['propfirmtrend', 'iamjminx']:
             slot_patterns = [
                 r'slot\s+([A-E])\s+is\s+([A-Za-z0-9])',
